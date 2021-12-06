@@ -1,6 +1,8 @@
 #include "dosimeter.h"
 
-#include "Arduino.h"
+#include <Arduino.h>
+
+#include <ESP8266TimerInterrupt.h>
 
 DosimeterType Dosimeter;
 
@@ -19,13 +21,17 @@ int type;
 volatile int buckets[BUCKETS_PER_MINUTE] = {0};
 int last = 0;
 bool valid = false;
+bool measureDose = false;
+volatile float dose = 0;
+
+ESP8266Timer timer;
 
 static inline void clearISR() {
     unsigned long gpio_status = GPIO_REG_READ(GPIO_STATUS_ADDRESS);
     GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, gpio_status);
 }
 
-static void ICACHE_RAM_ATTR isr() {
+static void ICACHE_RAM_ATTR geigerISR() {
     int next = (millis() / BUCKET_WIDTH_IN_MS) % BUCKETS_PER_MINUTE;
 
     if (last != next) {
@@ -42,11 +48,20 @@ static void ICACHE_RAM_ATTR isr() {
     clearISR();
 }
 
+// timerISR gets called every minute
+static void ICACHE_RAM_ATTR timerISR() {
+    if (measureDose && valid) {
+        dose += Dosimeter.getEquivalentDoseRate() / 60;
+    }
+}
+
 void DosimeterType::begin(int pin, int _type) {
     type = _type;
 
     pinMode(pin, INPUT);
-    attachInterrupt(digitalPinToInterrupt(pin), isr, RISING);
+    attachInterrupt(digitalPinToInterrupt(pin), geigerISR, RISING);
+
+    timer.attachInterruptInterval(60l * 1000 * 1000, timerISR);
 }
 
 int DosimeterType::getCPM() {
@@ -61,6 +76,14 @@ float DosimeterType::getEquivalentDoseRate() {
     return getCPM() * getCalibrationFactor(type);
 }
 
+float DosimeterType::getEquivalentDose() {
+    if (measureDose) {
+        return dose;
+    } else {
+        return NAN;
+    }
+}
+
 bool DosimeterType::isValid() {
     if (valid) {
         return true;
@@ -68,4 +91,13 @@ bool DosimeterType::isValid() {
         valid = millis() > (60l * 1000);
         return valid;
     }
+}
+
+void DosimeterType::startRecording() {
+    dose = 0;
+    measureDose = true;
+}
+
+void DosimeterType::stopRecording() {
+    measureDose = false;
 }

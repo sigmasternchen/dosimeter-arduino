@@ -10,10 +10,14 @@
 class DosimeterType {
 public:
     void begin(int pin, int type);
+    void startRecording();
+    void stopRecording();
 
     bool isValid();
 
     float getEquivalentDoseRate();
+    float getEquivalentDose();
+
     int getCPM();
 private:
 };
